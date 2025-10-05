@@ -154,7 +154,7 @@ class _SpeedometerScreenState extends State<SpeedometerScreen>
         _errorMessage = null;
       });
 
-      _startTracking();
+      // _startTracking();
     } catch (e) {
       setState(() {
         _errorMessage = 'Error: ${e.toString()}';
@@ -163,40 +163,75 @@ class _SpeedometerScreenState extends State<SpeedometerScreen>
     }
   }
 
-  void _startTracking() {
-    if (_isTracking) return;
+  void _startTracking() async {
+    if (_isTracking) return; // prevent duplicate sessions
 
+    // 🔐 Request permission safely
+    final permission = await Geolocator.requestPermission();
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      debugPrint('Location permission denied');
+      return;
+    }
+
+    // 🕒 Initialize trip
     setState(() {
       _isTracking = true;
       _tripData.startTime = DateTime.now();
+      _tripData.endTime = null;
     });
 
+    // 🧭 Cancel old stream/timer if still active (safety)
+    _positionStream?.cancel();
     _durationTimer?.cancel();
-    _durationTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (_isTracking) setState(() {});
+
+    // ⏱️ Start duration timer
+    _durationTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!_isTracking) {
+        timer.cancel();
+        return;
+      }
+      setState(() {}); // triggers UI time updates
     });
 
+    // 📍 Start location updates
     _positionStream =
         Geolocator.getPositionStream(
           locationSettings: const LocationSettings(
             accuracy: LocationAccuracy.bestForNavigation,
-            distanceFilter: 3,
+            distanceFilter: 0,
           ),
         ).listen((Position position) {
+          if (!_isTracking) return; // ignore if stopped
           _updatePosition(position);
         });
+
+    debugPrint('✅ Tracking started at ${_tripData.startTime}');
   }
 
   void _stopTracking() {
+    // 🛑 Stop location & timer
     _positionStream?.cancel();
+    _positionStream = null;
+
     _durationTimer?.cancel();
+    _durationTimer = null;
+
+    // 🧭 Mark end of trip
     setState(() {
       _isTracking = false;
       _tripData.endTime = DateTime.now();
+      _speed = 0; // reset current speed
     });
+
+    debugPrint('🛑 Tracking stopped at ${_tripData.endTime}');
   }
 
   void _resetTrip() {
+    if (_isTracking) {
+      _stopTracking();
+    }
+
     setState(() {
       _tripData.reset();
       _speed = 0;
@@ -373,10 +408,17 @@ class _SpeedometerScreenState extends State<SpeedometerScreen>
                     SizedBox(height: 10.h),
 
                     // Control buttons
-                    _buildControlButtons(),
+                    // _buildControlButtons(),
                   ],
                 ),
               ),
+            ),
+
+            Positioned(
+              left: 16.w,
+              right: 16.w,
+              bottom: MediaQuery.of(context).padding.bottom + 16,
+              child: _buildControlButtons(),
             ),
 
             // Speed warning overlay
@@ -824,43 +866,45 @@ class _SpeedometerScreenState extends State<SpeedometerScreen>
 
   Widget _buildControlButtons() {
     return Container(
-      height: 48.h,
+      height: 56.h, // slightly taller for better touch target
       child: Row(
         children: [
           Expanded(
+            flex: 3,
             child: ElevatedButton.icon(
               onPressed: _isTracking ? _stopTracking : _startTracking,
               icon: Icon(
                 _isTracking ? Icons.stop : Icons.play_arrow,
-                size: 20.sp,
+                size: 24.sp, // bigger icon
               ),
               label: Text(
                 _isTracking ? 'Stop Trip' : 'Start Trip',
-                style: TextStyle(fontSize: 14.sp),
+                style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.bold),
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: _isTracking ? Colors.red : Colors.green,
                 foregroundColor: Colors.white,
+                padding: EdgeInsets.symmetric(vertical: 14.h),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10.r),
+                  borderRadius: BorderRadius.circular(12.r),
                 ),
               ),
             ),
           ),
-          SizedBox(width: 10.w),
-          SizedBox(
-            width: 48.w,
+          SizedBox(width: 16.w), // more spacing
+          Expanded(
+            flex: 1,
             child: ElevatedButton(
               onPressed: _resetTrip,
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white.withOpacity(0.1),
+                backgroundColor: Colors.white.withOpacity(0.15),
                 foregroundColor: Colors.white,
-                padding: EdgeInsets.all(12.w),
+                padding: EdgeInsets.symmetric(vertical: 14.h),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10.r),
+                  borderRadius: BorderRadius.circular(12.r),
                 ),
               ),
-              child: Icon(Icons.refresh, size: 20.sp),
+              child: Icon(Icons.refresh, size: 24.sp), // bigger icon
             ),
           ),
         ],
